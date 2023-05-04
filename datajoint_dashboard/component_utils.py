@@ -161,10 +161,10 @@ def create_edit_record_table(
             c['name'] = c['name'] + '*'
         # add data type
         dtype = heading.attributes[c['id']].type
-        # if there is unit
-        unit = re.search(r'^\((.+)\)', heading.attributes[c['id']].comment)
-        if unit:
-            dtype = dtype + f'; {unit.group(1)}'
+        if unit := re.search(
+            r'^\((.+)\)', heading.attributes[c['id']].comment
+        ):
+            dtype = f'{dtype}; {unit[1]}'
 
         c['name'] = c['name'] + f' ({dtype})'
 
@@ -209,54 +209,57 @@ def create_modal(table, id=None, dropdown_fields=[], extra_tables=[],
     if not dropdown_fields:
         dropdown_fields = dj_utils.get_dropdown_fields(table)
 
-    master_table = []
-    master_table.append(
+    master_table = [
         html.Div(
-        children=[
-            html.H6(f'{mode.capitalize()} {table.__name__} record'),
-            create_edit_record_table(
-                table, f'{mode}-{id}-table',
-                dropdown_fields=dropdown_fields,
-                height='110px', width='815px',
-                pk_editable=mode != 'update',
-                defaults=defaults)
+            children=[
+                html.H6(f'{mode.capitalize()} {table.__name__} record'),
+                create_edit_record_table(
+                    table,
+                    f'{mode}-{id}-table',
+                    dropdown_fields=dropdown_fields,
+                    height='110px',
+                    width='815px',
+                    pk_editable=mode != 'update',
+                    defaults=defaults,
+                ),
             ],
-            style={'marginLeft': '2em', 'marginTop': '0.5em'}
+            style={'marginLeft': '2em', 'marginTop': '0.5em'},
         )
-    )
-    
-
+    ]
     # TODO: allow defaults in part table as well
     if extra_tables:
-        part_tables = []
-        for p in extra_tables:
-            part_tables.append(
-                html.Div(
-                    id=f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-table-div',
-                    children=[
-                        html.H6(f'{p.__name__}'),
-                        html.Button(
-                            'Add a row',
-                            id=f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-add-row-button',
-                            style={
-                                    'display': 'block',
-                                    'width': '150px',
-                                    'height': '40px',
-                                    'marginBottom': '0.5em',
-                                    'marginTop': '0.3em'
-                                }
-                            ),
-                        create_edit_record_table(
-                            p, f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-table',
-                            excluded_fields=table.heading.primary_key,
-                            height='110px', width='auto',
-                            pk_editable=True, deletable=True),
-                    ],
-                    style={'marginLeft': '2em', 'marginBottom': '1em'}
-                ),
+        part_tables = [
+            html.Div(
+                id=f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-table-div',
+                children=[
+                    html.H6(f'{p.__name__}'),
+                    html.Button(
+                        'Add a row',
+                        id=f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-add-row-button',
+                        style={
+                            'display': 'block',
+                            'width': '150px',
+                            'height': '40px',
+                            'marginBottom': '0.5em',
+                            'marginTop': '0.3em',
+                        },
+                    ),
+                    create_edit_record_table(
+                        p,
+                        f'{mode}-{table.__name__.lower()}-{p.__name__.lower()}-table',
+                        excluded_fields=table.heading.primary_key,
+                        height='110px',
+                        width='auto',
+                        pk_editable=True,
+                        deletable=True,
+                    ),
+                ],
+                style={'marginLeft': '2em', 'marginBottom': '1em'},
             )
+            for p in extra_tables
+        ]
         tables = [dbc.Row(master_table), dbc.Row(part_tables)]
- 
+
     else:
         tables = [dbc.Row(master_table)]
 
@@ -293,5 +296,5 @@ def create_filter_dropdown(table, id, field, width='200px'):
             for f in (dj.U(field) & table).fetch(field)
         ],
         style={'width': width, 'marginBottom': '0.5em'},
-        placeholder='Select {} ...'.format(field),
+        placeholder=f'Select {field} ...',
     )

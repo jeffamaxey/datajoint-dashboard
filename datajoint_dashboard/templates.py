@@ -126,10 +126,7 @@ class TableBlock:
             self.filter_collection_layout = html.Div()
             self.query = self.table
 
-        if empty_first:
-            self.main_table_data = []
-        else:
-            self.main_table_data = self.query.fetch(as_dict=True)
+        self.main_table_data = [] if empty_first else self.query.fetch(as_dict=True)
         self.table_name = table.__name__.lower()
         self.table_original_name = table.__name__
         self.primary_key = table.heading.primary_key
@@ -148,7 +145,7 @@ class TableBlock:
         # validate the extra tables
         self.valid_extra_tables = []
         for t in extra_tables:
-            if all([k in t.heading.primary_key for k in self.primary_key]):
+            if all(k in t.heading.primary_key for k in self.primary_key):
                 self.valid_extra_tables.append(t)
             else:
                 warnings.warn(
@@ -390,40 +387,37 @@ class TableBlock:
     def callbacks(self, app):
 
         @app.callback(
-            [
-                Output(f'delete-{self.table_name}-button', 'disabled'),
-                Output(f'update-{self.table_name}-button', 'disabled')
-            ],
-            [
-                Input(f'{self.table_name}-table', 'selected_rows')
-            ])
+                [
+                    Output(f'delete-{self.table_name}-button', 'disabled'),
+                    Output(f'update-{self.table_name}-button', 'disabled')
+                ],
+                [
+                    Input(f'{self.table_name}-table', 'selected_rows')
+                ])
         def set_button_enabled_state(selected_rows):
-            if selected_rows:
-                disabled = False
-            else:
-                disabled = True
+            disabled = not selected_rows
             return disabled, disabled
 
         @app.callback(
-            Output(f'delete-{self.table_name}-confirm', 'displayed'),
-            [Input(f'delete-{self.table_name}-button', 'n_clicks')])
+                Output(f'delete-{self.table_name}-confirm', 'displayed'),
+                [Input(f'delete-{self.table_name}-button', 'n_clicks')])
         def display_delete_confirm(n_clicks):
-            if n_clicks:
-                return True
-            return False
+            return bool(n_clicks)
 
         # ---------------------- callback update table data ------------------------
-        if not self.valid_extra_tables:
-            update_table_data_outputs = [
-                Output(f'{self.table_name}-table', 'data'),
-                Output(f'delete-{self.table_name}-message-box', 'value')
+        update_table_data_outputs = (
+            [Output(f'{self.table_name}-table', 'data')]
+            + [
+                Output(f'{self.table_name}-{t.__name__.lower()}-table', 'data')
+                for t in self.valid_extra_tables
             ]
-        else:
-            update_table_data_outputs = \
-                [Output(f'{self.table_name}-table', 'data')] + \
-                [Output(f'{self.table_name}-{t.__name__.lower()}-table', 'data')
-                 for t in self.valid_extra_tables] + \
-                [Output(f'delete-{self.table_name}-message-box', 'value')]
+            + [Output(f'delete-{self.table_name}-message-box', 'value')]
+            if self.valid_extra_tables
+            else [
+                Output(f'{self.table_name}-table', 'data'),
+                Output(f'delete-{self.table_name}-message-box', 'value'),
+            ]
+        )
         if self.filter_collection.filters:
             update_table_data_outputs += [
                 Output(f.filter_id, 'options') for f in self.filter_collection.filters.values()
@@ -441,43 +435,45 @@ class TableBlock:
             ]
 
         @app.callback(
-            update_table_data_outputs,
-            update_table_data_inputs,
-            [
-                State(f'{self.table_name}-table', 'data'),
-            ]
-        )
+                update_table_data_outputs,
+                update_table_data_inputs,
+                [
+                    State(f'{self.table_name}-table', 'data'),
+                ]
+            )
         def update_table_data(*args):
-            n_clicks_add_close, n_clicks_delete, n_clicks_update_close, selected_rows = args[0:4]
+            (
+                n_clicks_add_close,
+                n_clicks_delete,
+                n_clicks_update_close,
+                selected_rows,
+            ) = args[:4]
             data = args[-1]
             filter_values = args[4:-1]
 
             if hasattr(self, 'filters') and \
-                    len(filter_values) != len(self.filter_collection.filters.values()):
+                        len(filter_values) != len(self.filter_collection.filters.values()):
                 raise ValueError('Number of filter value inputs does not match the number of filters')
 
-            filter_values_dict = {
-                k: f_value
-                for k, f_value in
-                zip(self.filter_collection.filters.keys(), filter_values)}
+            filter_values_dict = dict(
+                zip(self.filter_collection.filters.keys(), filter_values)
+            )
 
             delete_message = f'Delete {self.table.__name__} record message:\n'
             ctx = dash.callback_context
             triggered_component = ctx.triggered[0]['prop_id'].split('.')[0]
 
             if triggered_component == f'delete-{self.table_name}-confirm' and \
-                    selected_rows:
+                        selected_rows:
                 pk = self.get_pk(data[selected_rows[0]])
                 try:
                     if _get_tier(self.table.full_table_name) == dj.user_tables.Part:
                         (self.table & pk).delete(force=True)
                     else:
                         (self.table & pk).delete()
-                    delete_message = delete_message + \
-                        f'Successfully deleted record {pk}!'
+                    delete_message = f'{delete_message}Successfully deleted record {pk}!'
                 except Exception as e:
-                    delete_message = delete_message + \
-                        f'Error in deleting record {pk}: {str(e)}.'
+                    delete_message = f'{delete_message}Error in deleting record {pk}: {str(e)}.'
                 data = self.query.fetch(as_dict=True)
                 self.main_table_data = data
             elif triggered_component in (f'add-{self.table_name}-close',
@@ -515,15 +511,20 @@ class TableBlock:
                     for f in self.filter_collection.filters.values()]
 
             if self.valid_extra_tables:
-                if self.filter_collection.filters:
-                    return tuple([data] + extra_table_data + [delete_message] + filter_options)
-                else:
-                    return tuple([data] + extra_table_data + [delete_message])
+                return (
+                    tuple(
+                        [data]
+                        + extra_table_data
+                        + [delete_message]
+                        + filter_options
+                    )
+                    if self.filter_collection.filters
+                    else tuple([data] + extra_table_data + [delete_message])
+                )
+            if self.filter_collection.filters:
+                return tuple([data] + [delete_message] + filter_options)
             else:
-                if self.filter_collection.filters:
-                    return tuple([data] + [delete_message] + filter_options)
-                else:
-                    return tuple([data] + [delete_message])
+                return tuple([data] + [delete_message])
 
         def toggle_modal(*args, mode='add'):
 
@@ -533,7 +534,7 @@ class TableBlock:
                  modal_data) = args
 
             elif len(args) > 6 and \
-                    len(args) - 6 == 3*len(self.valid_extra_tables):
+                        len(args) - 6 == 3*len(self.valid_extra_tables):
 
                 (n_open, n_close) = args[:2]
                 idx_end = 2 + self.n_extra_tables
@@ -584,10 +585,10 @@ class TableBlock:
                 modal_open = not is_open if n_open or n_close else is_open
 
             elif self.valid_extra_tables and \
-                    triggered_component in add_row_buttons:
+                        triggered_component in add_row_buttons:
                 table_idx = add_row_buttons.index(triggered_component)
                 modal_data_extra_tables[table_idx] += \
-                    [{k: '' for k in self.valid_extra_table_fields[table_idx]
+                        [{k: '' for k in self.valid_extra_table_fields[table_idx]
                      if k not in self.primary_key}]
 
                 modal_open = is_open
@@ -617,38 +618,38 @@ class TableBlock:
 
         if self.valid_extra_tables:
             add_record_states = \
-                [
+                    [
                     State(f'add-{self.table_name}-table', 'data')
                 ] + \
-                [
+                    [
                     State(f'add-{name}-table', 'data')
                     for name in self.valid_extra_table_names
                 ] + \
-                [
+                    [
                     State(f'add-{self.table_name}-message', 'value')
                 ]
         else:
             add_record_states = \
-                [
+                    [
                     State(f'add-{self.table_name}-table', 'data'),
                     State(f'add-{self.table_name}-message', 'value')
                 ]
 
         @app.callback(
-            Output(f'add-{self.table_name}-message', 'value'),
-            [
-                Input(f'add-{self.table_name}-confirm', 'n_clicks'),
-                Input(f'add-{self.table_name}-close', 'n_clicks')
-            ],
-            add_record_states
-        )
+                Output(f'add-{self.table_name}-message', 'value'),
+                [
+                    Input(f'add-{self.table_name}-confirm', 'n_clicks'),
+                    Input(f'add-{self.table_name}-close', 'n_clicks')
+                ],
+                add_record_states
+            )
         def add_record(*args):
 
             if len(args) == 4:
                 (n_clicks_add, n_clicks_close,
                  new_data, add_message) = args
             elif self.valid_extra_table_fields and \
-                    len(args) == 4 + len(self.valid_extra_table_fields):
+                        len(args) == 4 + len(self.valid_extra_table_fields):
                 (n_clicks_add, n_clicks_close, new_data) = args[:3]
                 new_data_extra_tables = list(args[3:3+self.n_extra_tables])
                 add_message = args[-1]
@@ -667,15 +668,14 @@ class TableBlock:
                 pk = self.get_pk(entry)
                 try:
                     if (self.table & pk):
-                        add_message = add_message + \
-                            f'\nWarning: record {pk} exists in database\n'
+                        add_message += f'\nWarning: record {pk} exists in database\n'
                     else:
                         self.table.insert1(entry)
                         add_message = add_message + \
-                            f'\nSuccessfully inserted into {self.table.__name__}.\n'
+                                f'\nSuccessfully inserted into {self.table.__name__}.\n'
                 except Exception as e:
                     add_message = add_message + \
-                        f'\nError inserting into {self.table_name}: {str(e)}'
+                            f'\nError inserting into {self.table_name}: {str(e)}'
 
                 if self.valid_extra_tables:
                     for t, data_t in zip(
@@ -691,12 +691,12 @@ class TableBlock:
             return add_message
 
         update_record_states = \
-            [
+                [
                 State(f'update-{self.table_name}-table', 'data'),
             ]
         if self.valid_extra_tables:
             update_record_states += \
-            [
+                [
                 State(f'update-{name}-table', 'data')
                 for name in self.valid_extra_table_names
             ]
@@ -733,28 +733,28 @@ class TableBlock:
 
     def refresh_tables(self):
 
-        if not self.refreshed:
+        if self.refreshed:
+            return
+        vm = dj.create_virtual_module(
+            self.schema_name, self.schema_name)
+        if self.table_is_part:
+            master_table = getattr(vm, self.master_name)
+            self.table = getattr(master_table, self.table_original_name)
+        else:
+            self.table = getattr(vm, self.table_original_name)
 
-            vm = dj.create_virtual_module(
-                self.schema_name, self.schema_name)
-            if self.table_is_part:
-                master_table = getattr(vm, self.master_name)
-                self.table = getattr(master_table, self.table_original_name)
-            else:
-                self.table = getattr(vm, self.table_original_name)
+        if self.valid_extra_tables:
+            self.valid_extra_tables = []
+            for schema_name, table_name, is_part, master_name in zip(
+                    self.valid_extra_table_schemas,
+                    self.valid_extra_table_original_names,
+                    self.valid_extra_table_is_part,
+                    self.valid_extra_table_master_names):
+                vm = dj.create_virtual_module(schema_name, schema_name)
+                if is_part:
+                    master_table = getattr(vm, master_name)
+                    table = getattr(master_table, table_name)
+                else:
+                    table = getattr(vm, table_name)
 
-            if self.valid_extra_tables:
-                self.valid_extra_tables = []
-                for schema_name, table_name, is_part, master_name in zip(
-                        self.valid_extra_table_schemas,
-                        self.valid_extra_table_original_names,
-                        self.valid_extra_table_is_part,
-                        self.valid_extra_table_master_names):
-                    vm = dj.create_virtual_module(schema_name, schema_name)
-                    if is_part:
-                        master_table = getattr(vm, master_name)
-                        table = getattr(master_table, table_name)
-                    else:
-                        table = getattr(vm, table_name)
-
-                    self.valid_extra_tables.append(table)
+                self.valid_extra_tables.append(table)
